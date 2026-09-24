@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# Markdown files (requested: keep working notes out of the repo).
+# README.md is re-included below because the subject requires it at the root
+# of the repository (chapter VIII / X). Without it the submission is invalid.
+# ---------------------------------------------------------------------------
+*.md
+!README.md
+
+# ---------------------------------------------------------------------------
+# Project inputs / outputs (never commit large data, weights or generated files)
+# ---------------------------------------------------------------------------
+*.zip
+*.pdf
+data/raw/
+data/processed/
+data/output/
+data/datasets/
+moulinette
+moulinette-*
+
+# Model weights / HF cache
+*.safetensors
+*.bin
+*.gguf
+*.pt
+*.pth
+models/
+.cache/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Tooling caches
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.flake8_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# ---------------------------------------------------------------------------
+# Environment / secrets
+# ---------------------------------------------------------------------------
+.env
+.envrc
+*.env
+
+# ---------------------------------------------------------------------------
+# Editors / OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Claude Code local state
+# ---------------------------------------------------------------------------
+.claude/

@@ -81,3 +81,6 @@ Thumbs.db
 # Claude Code local state
 # ---------------------------------------------------------------------------
 .claude/
+
+# Working notes and throwaway scripts
+notes/

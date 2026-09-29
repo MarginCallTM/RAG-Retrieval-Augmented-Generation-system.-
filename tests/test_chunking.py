@@ -122,3 +122,49 @@ def test_whole_corpus_invariants(max_size: int) -> None:
         assert text is not None
         chunks = chunk_file(to_corpus_path(path), text, max_size)
         assert_exact(chunks, text, max_size)
+
+
+PYTHON = '''import os
+import sys
+
+# Maximum value of an FP8 number.
+FP8_MAX = 448.0
+
+
+class Engine:
+    """A toy engine."""
+
+    def __init__(self) -> None:
+        self.steps = 0
+
+    # Advance by one step.
+    @staticmethod
+    def step(x: int) -> int:
+        y = x * 2
+        return y
+'''
+
+
+def test_python_small_file_is_one_chunk() -> None:
+    """A file under the limit is packed into a single chunk."""
+    chunks = chunk_file("mod.py", PYTHON, 2000)
+    assert len(chunks) == 1
+    assert_exact(chunks, PYTHON, 2000)
+
+
+def test_python_big_class_splits_on_methods() -> None:
+    """Above the limit, a class is cut between its methods, and a method
+    keeps its decorator and the comment right above it."""
+    chunks = chunk_file("mod.py", PYTHON, 120)
+    assert_exact(chunks, PYTHON, 120)
+    starts = [chunk.text.splitlines()[0] for chunk in chunks]
+    assert "# Advance by one step." in starts
+    assert not any(s.startswith("@staticmethod") for s in starts)
+
+
+def test_python_syntax_error_falls_back_to_text() -> None:
+    """A file that does not parse is still chunked, never a crash."""
+    broken = "def f(:\n    pass\n\n\nx = 1\n"
+    chunks = chunk_file("broken.py", broken, 2000)
+    assert_exact(chunks, broken, 2000)
+    assert chunks

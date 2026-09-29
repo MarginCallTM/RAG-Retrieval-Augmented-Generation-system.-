@@ -5,8 +5,10 @@ modifies it, so that ``text[first:last]`` is always the chunk text.
 A span is a pair ``(first, last)`` with ``last`` exclusive.
 """
 
+import ast
 import re
-from typing import List, Tuple
+import warnings
+from typing import Callable, Dict, List, Optional, Tuple
 
 from src.models import Chunk
 
@@ -69,11 +71,16 @@ def hard_split(text: str, span: Span, max_chunk_size: int) -> List[Span]:
 
 
 def pack_blocks(
-    text: str, blocks: List[Span], max_chunk_size: int
+    text: str,
+    blocks: List[Span],
+    max_chunk_size: int,
+    split_oversized: Optional[Callable[[Span], List[Span]]] = None,
 ) -> List[Span]:
     """Merge adjacent blocks greedily into spans of at most the limit.
 
-    Blocks must be contiguous. A block alone above the limit is hard-split.
+    Blocks must be contiguous. A block alone above the limit is handed to
+    ``split_oversized`` (the Python splitter recurses into it), or
+    hard-split on lines when no such function is given.
     """
     spans: List[Span] = []
     if not blocks:
@@ -87,9 +94,11 @@ def pack_blocks(
         if current_end > current_start:
             spans.append((current_start, current_end))
         if block_end - block_start > max_chunk_size:
-            spans.extend(
-                hard_split(text, (block_start, block_end), max_chunk_size)
-            )
+            block = (block_start, block_end)
+            if split_oversized is None:
+                spans.extend(hard_split(text, block, max_chunk_size))
+            else:
+                spans.extend(split_oversized(block))
             current_start = current_end = block_end
         else:
             current_start, current_end = block_start, block_end
@@ -144,6 +153,94 @@ def split_markdown(text: str, max_chunk_size: int) -> List[Span]:
     return spans
 
 
+def statement_start(
+    text: str, lines: List[int], node: ast.stmt, floor: int
+) -> int:
+    """Return the offset where the block of a statement starts.
+
+    The block starts on the first decorator, if any, then climbs over the
+    comment lines right above it, so a function keeps its decorators and
+    its leading comment. It never climbs above ``floor``.
+    """
+    first_line = node.lineno
+    for decorator in getattr(node, "decorator_list", []):
+        first_line = min(first_line, decorator.lineno)
+    index = first_line - 1
+    while index > 0 and lines[index - 1] >= floor:
+        previous = text[lines[index - 1]:lines[index]]
+        if not previous.lstrip().startswith("#"):
+            break
+        index -= 1
+    return max(lines[index], floor)
+
+
+def child_statements(node: ast.AST) -> List[ast.stmt]:
+    """Return the statements directly inside a node (a def or class body)."""
+    return [
+        child for child in ast.iter_child_nodes(node)
+        if isinstance(child, ast.stmt)
+    ]
+
+
+def split_statements(
+    text: str,
+    lines: List[int],
+    statements: List[ast.stmt],
+    span: Span,
+    max_chunk_size: int,
+) -> List[Span]:
+    """Split ``span`` into one block per statement, then pack the blocks.
+
+    A block too big for the limit is split again on the statements it
+    contains (a class on its methods, a function on its body). A block
+    with no inner statement (a huge dict literal) falls back to blank
+    lines, then lines.
+    """
+    start, end = span
+    node_at: Dict[int, ast.stmt] = {}
+    for node in statements:
+        offset = statement_start(text, lines, node, start)
+        if start <= offset < end:
+            node_at.setdefault(offset, node)
+    boundaries = sorted(set([start, *node_at])) + [end]
+    blocks = [
+        (first, last)
+        for first, last in zip(boundaries, boundaries[1:])
+        if last > first
+    ]
+
+    def split_oversized(block: Span) -> List[Span]:
+        node = node_at.get(block[0])
+        children = child_statements(node) if node is not None else []
+        if children:
+            return split_statements(
+                text, lines, children, block, max_chunk_size
+            )
+        paragraphs = paragraph_blocks(text, block[0], block[1])
+        return pack_blocks(text, paragraphs, max_chunk_size)
+
+    return pack_blocks(text, blocks, max_chunk_size, split_oversized)
+
+
+def split_python(text: str, max_chunk_size: int) -> List[Span]:
+    """Split Python source on its statements, recursing into big ones.
+
+    Small neighbouring statements (imports, short functions) are packed
+    together up to the limit. A file that does not parse falls back to the
+    plain text splitter instead of failing the whole indexing.
+    """
+    try:
+        with warnings.catch_warnings():
+            # Invalid escape sequences in the corpus raise SyntaxWarning.
+            warnings.simplefilter("ignore")
+            tree = ast.parse(text)
+    except (SyntaxError, ValueError, RecursionError):
+        return split_text(text, max_chunk_size)
+    return split_statements(
+        text, line_starts(text), tree.body, (0, len(text)), max_chunk_size
+    )
+
+
 def trim_span(text: str, span: Span) -> Span:
     """Move the span bounds inward past leading and trailing whitespace.
 
@@ -182,8 +279,9 @@ def chunk_file(
         raise ValueError("max_chunk_size must be a positive integer")
     if file_path.endswith(".md"):
         spans = split_markdown(text, max_chunk_size)
+    elif file_path.endswith(".py"):
+        spans = split_python(text, max_chunk_size)
     else:
-        # .txt, and .py until the Python splitter exists.
         spans = split_text(text, max_chunk_size)
     chunks: List[Chunk] = []
     for span in spans:

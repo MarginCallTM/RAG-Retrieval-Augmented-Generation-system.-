@@ -38,6 +38,20 @@ class MinimalSource(BaseModel):
         return self
 
 
+class Chunk(MinimalSource):
+    """A slice of a corpus file, produced by the chunkers.
+
+    Not in the subject. It is a MinimalSource plus the text of the slice,
+    so that ``text == file_content[first:last]`` always holds and a chunk
+    can be returned wherever a MinimalSource is expected.
+
+    Attributes:
+        text: The exact characters of the file between the two indices.
+    """
+
+    text: str
+
+
 class UnansweredQuestion(BaseModel):
     """A question without its ground truth, as given to search_dataset."""
 

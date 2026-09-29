@@ -52,6 +52,21 @@ class Chunk(MinimalSource):
     text: str
 
 
+class ChunkIndex(BaseModel):
+    """What index writes to data/processed/: the chunks and their settings.
+
+    Not in the subject. ``max_chunk_size`` is stored so that a later
+    command can tell which setting produced the chunks it loads.
+
+    Attributes:
+        max_chunk_size: The limit every chunk was cut under.
+        chunks: All chunks of the corpus, file by file, in file order.
+    """
+
+    max_chunk_size: int
+    chunks: List[Chunk]
+
+
 class UnansweredQuestion(BaseModel):
     """A question without its ground truth, as given to search_dataset."""
 

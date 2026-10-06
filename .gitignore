@@ -5,6 +5,8 @@
 # ---------------------------------------------------------------------------
 *.md
 !README.md
+!CLAUDE.md
+!TODO.md
 
 # ---------------------------------------------------------------------------
 # Project inputs / outputs (never commit large data, weights or generated files)

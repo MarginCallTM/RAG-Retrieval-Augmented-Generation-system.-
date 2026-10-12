@@ -6,7 +6,7 @@ They are the contract with the datasets (input) and with the moulinette
 """
 
 import uuid
-from typing import List
+from typing import Dict, List
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -80,6 +80,27 @@ class ScoredChunk(BaseModel):
 
     chunk: Chunk
     score: float
+
+
+class ExplainedChunk(ScoredChunk):
+    """A scored chunk with the share of its score due to each query term.
+
+    Not in the subject: debugging output of ``search --render_path``.
+
+    Attributes:
+        contributions: Query term -> points it brought to the score, terms
+            absent from the chunk omitted, biggest contribution first.
+    """
+
+    contributions: Dict[str, float]
+
+
+class ExplainedSearch(BaseModel):
+    """The full picture of one search, for inspection by hand."""
+
+    query: str
+    terms: List[str]
+    results: List[ExplainedChunk]
 
 
 class UnansweredQuestion(BaseModel):

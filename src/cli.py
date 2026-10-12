@@ -60,7 +60,7 @@ def parse_k(value: object) -> int:
     return value
 
 
-def load_retriver(processed_dir: str) -> Retriever:
+def load_retriever(processed_dir: str) -> Retriever:
     """Load the index written by "index" and build a retriver on it.
 
     Raises:
@@ -131,26 +131,32 @@ class RagCli:
         )
 
     def search(
-        self, query: str, k: int = 5, processed_dir: str = "data/processed"
+        self,
+        query: str,
+        k: int = 5,
+        processed_dir: str = "data/processed",
+        render_path: str = "",
     ) -> None:
         """Print the top-k sources for a single query.
 
         Args:
             query: The question to search for.
             k: Number of sources to return.
-            processed_dir: Directory holding the index written by "index"
+            processed_dir: Directory holding the index written by ``index``.
+            render_path: If given, also write a JSON file there with the
+                text of each result and the score share of each query term.
 
         Raises:
-            CliError: On an invalid k or a missing index.
+            CliError: On an invalid k, a missing index, or an unwritable
+                render path.
         """
         top = parse_k(k)
-        # fire turns 'search_42' into an int: the query is always a string.
+        # fire turns `search 42` into an int: the query is always a string.
         text = str(query)
-        retriever = load_retriver(processed_dir)
+        retriever = load_retriever(processed_dir)
         results = retriever.search(text, top)
         if not results:
             print("no result")
-            return
         for rank, result in enumerate(results, start=1):
             chunk = result.chunk
             print(
@@ -158,6 +164,17 @@ class RagCli:
                 f"[{chunk.first_character_index}:"
                 f"{chunk.last_character_index}] score={result.score:.2f}"
             )
+        if render_path:
+            target = Path(str(render_path))
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with open(target, "w", encoding="utf-8") as handle:
+                    handle.write(
+                        retriever.explain(text, top).model_dump_json(indent=2)
+                    )
+            except OSError as error:
+                raise CliError(f"could not write {target}: {error}") from error
+            print(f"rendered to {target}")
 
     def search_dataset(
         self, dataset_path: str, k: int = 10, save_directory: str = "."

@@ -1,12 +1,15 @@
 """Rank the chunks of an index against a query with BM25."""
 
-from typing import List
+from collections import Counter
+from typing import List, Tuple
 
 import numpy as np
 from rank_bm25 import BM25Okapi
 from tqdm import tqdm
 
-from src.models import ChunkIndex, ScoredChunk
+from src.models import (
+    ChunkIndex, ExplainedChunk, ExplainedSearch, ScoredChunk,
+)
 from src.tokenizer import tokenize
 
 # rank_bm25 defaults, the usual starting point in the literature. Exposed
@@ -42,6 +45,18 @@ class Retriever:
         ]
         self.bm25 = BM25Okapi(corpus, k1=k1, b=b)
 
+    def _top(self, terms: List[str], k: int) -> List[Tuple[int, float]]:
+        """Return ``(chunk position, score)`` of the k best chunks.
+
+        Shared by ``search`` and ``explain`` so both rank the same way.
+        """
+        if k <= 0 or not terms:
+            return []
+        scores = np.asarray(self.bm25.get_scores(terms), dtype=float)
+        # Stable sort on -score keeps index order among equal scores.
+        order = np.argsort(-scores, kind="stable")[:k]
+        return [(int(i), float(scores[i])) for i in order if scores[i] > 0]
+
     def search(self, query: str, k: int) -> List[ScoredChunk]:
         """Return the ``k`` best chunks for ``query``, best first.
 
@@ -57,14 +72,37 @@ class Retriever:
             At most ``k`` scored chunks, ties broken by index order so
             that the output is deterministic.
         """
-        terms = tokenize(query)
-        if k <= 0 or not terms:
-            return []
-        scores = np.asarray(self.bm25.get_scores(terms), dtype=float)
-        # Stable sort on -score keeps index order among equal scores.
-        order = np.argsort(-scores, kind="stable")[:k]
         return [
-            ScoredChunk(chunk=self.chunks[i], score=float(scores[i]))
-            for i in order
-            if scores[i] > 0
+            ScoredChunk(chunk=self.chunks[i], score=score)
+            for i, score in self._top(tokenize(query), k)
         ]
+
+    def explain(self, query: str, k: int) -> ExplainedSearch:
+        """Like ``search``, with each score split per query term.
+
+        BM25 is a sum over the query terms, so scoring each distinct term
+        alone gives its share, times how often it occurs in the query.
+        Costs one pass over the corpus per term: fine for inspection, not
+        used by the dataset commands.
+        """
+        terms = tokenize(query)
+        counts = Counter(terms)
+        per_term = {
+            term: np.asarray(self.bm25.get_scores([term]), dtype=float)
+            for term in counts
+        }
+        results: List[ExplainedChunk] = []
+        for i, score in self._top(terms, k):
+            shares = {
+                term: round(float(count * per_term[term][i]), 3)
+                for term, count in counts.items()
+                if per_term[term][i] > 0
+            }
+            results.append(ExplainedChunk(
+                chunk=self.chunks[i],
+                score=score,
+                contributions=dict(
+                    sorted(shares.items(), key=lambda item: -item[1])
+                ),
+            ))
+        return ExplainedSearch(query=query, terms=terms, results=results)

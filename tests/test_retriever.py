@@ -70,3 +70,11 @@ def test_identifier_split_matches_paraphrase() -> None:
     # "batched tokens" is only in the chunk via max_num_batched_tokens.
     results = Retriever(make_index()).search("batched tokens", k=1)
     assert results[0].chunk.file_path == "data/raw/repo/file2.md"
+
+
+def test_explain_contributions_sum_to_the_score() -> None:
+    explained = Retriever(make_index()).explain("enable lora lora", k=2)
+    assert explained.terms == ["enable", "lora", "lora"]
+    for result in explained.results:
+        assert set(result.contributions) <= set(explained.terms)
+        assert abs(sum(result.contributions.values()) - result.score) < 0.01

@@ -10,8 +10,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from src.indexer import build_chunks, check_chunks, save_index
+from src.indexer import build_chunks, check_chunks, load_index, save_index
 from src.models import ChunkIndex
+from src.retriever import Retriever
 
 # The moulinette rejects any source longer than this (max_context_length).
 MAX_CONTEXT_LENGTH = 2000
@@ -42,6 +43,41 @@ def parse_chunk_size(value: object) -> int:
             f" got {value}"
         )
     return value
+
+
+def parse_k(value: object) -> int:
+    """Validate "--k"" as given by fire: a non-negative integer.
+
+    "k=0" is allowed and returns nothing, like a search with no match.
+
+    Raises:
+        CliError: if the value is not an integer or is negative.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise CliError(f"--k must be an integer, got {value!r}")
+    if value < 0:
+        raise CliError(f"--k must be >= 0, got {value}")
+    return value
+
+
+def load_retriver(processed_dir: str) -> Retriever:
+    """Load the index written by "index" and build a retriver on it.
+
+    Raises:
+        CliError: If the index is missing or cannot be parsed.
+    """
+    try:
+        index = load_index(Path(processed_dir))
+    except FileExistsError:
+        raise CliError(
+            f"no index in {processed_dir}: run 'index' first"
+        ) from None
+    except (ValidationError, ValueError, OSError) as error:
+        raise CliError(
+            f"could not load the index in {processed_dir}, run 'index' "
+            f"again {error}"
+        ) from error
+    return Retriever(index)
 
 
 class RagCli:
@@ -94,14 +130,34 @@ class RagCli:
             f"(max_chunk_size={size}) in {elapsed:.1f}s -> {target}"
         )
 
-    def search(self, query: str, k: int = 5) -> None:
-        """Return the top-k sources for a single query.
+    def search(
+        self, query: str, k: int = 5, processed_dir: str = "data/processed"
+    ) -> None:
+        """Print the top-k sources for a single query.
 
         Args:
             query: The question to search for.
             k: Number of sources to return.
+            processed_dir: Directory holding the index written by "index"
+
+        Raises:
+            CliError: On an invalid k or a missing index.
         """
-        print(f"search: not implemented (query={query!r}, k={k})")
+        top = parse_k(k)
+        # fire turns 'search_42' into an int: the query is always a string.
+        text = str(query)
+        retriever = load_retriver(processed_dir)
+        results = retriever.search(text, top)
+        if not results:
+            print("no result")
+            return
+        for rank, result in enumerate(results, start=1):
+            chunk = result.chunk
+            print(
+                f"{rank:2d}. {chunk.file_path} "
+                f"[{chunk.first_character_index}:"
+                f"{chunk.last_character_index}] score={result.score:.2f}"
+            )
 
     def search_dataset(
         self, dataset_path: str, k: int = 10, save_directory: str = "."

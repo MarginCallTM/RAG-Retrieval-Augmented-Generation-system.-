@@ -67,6 +67,21 @@ class ChunkIndex(BaseModel):
     chunks: List[Chunk]
 
 
+class ScoredChunk(BaseModel):
+    """A chunk with its retrieval score, as returned by the retriever.
+
+    Not in the subject. ``score`` is kept for debugging and for the hybrid
+    bonus; the CLI only prints the chunks.
+
+    Attributes:
+        chunk: The retrieved chunk.
+        score: Its BM25 score for the query, strictly positive.
+    """
+
+    chunk: Chunk
+    score: float
+
+
 class UnansweredQuestion(BaseModel):
     """A question without its ground truth, as given to search_dataset."""
 

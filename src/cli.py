@@ -6,13 +6,14 @@ into a clean message by ``src/__main__.py``, never into a traceback.
 """
 
 import time
+from collections import Counter
 from pathlib import Path
 
 from pydantic import ValidationError
 from tqdm import tqdm
 
 from src.datasets import MAX_CONTEXT_LENGTH, read_model, save_search_results
-from src.evaluation import evaluate_results
+from src.evaluation import MISS_HINTS, evaluate_results, list_misses
 from src.indexer import build_chunks, check_chunks, load_index, save_index
 from src.models import (
     AnsweredDataset, ChunkIndex, MinimalSearchResults, MinimalSource,
@@ -267,7 +268,11 @@ class RagCli:
         )
 
     def evaluate(
-        self, student_search_results_path: str, dataset_path: str
+        self,
+        student_search_results_path: str,
+        dataset_path: str,
+        show_misses: bool = False,
+        misses_at: int = 5,
     ) -> None:
         """Report recall@k of a search results file against a dataset.
 
@@ -276,6 +281,9 @@ class RagCli:
                 file written by ``search_dataset``.
             dataset_path: Path to the ground-truth dataset JSON file,
                 where every question carries its sources.
+            show_misses: If set, list every source missed at ``misses_at``
+                with the closest result, grouped by cause.
+            misses_at: The k at which misses are listed.
 
         Raises:
             CliError: If a file is missing or does not match its model.
@@ -308,3 +316,23 @@ class RagCli:
         print(f"Questions evaluated: {report.evaluated}")
         for k, value in report.recall.items():
             print(f"recall@{k}: {value:.3f} ({value:.1%})")
+
+        if not show_misses:
+            return
+        at = parse_k(misses_at)
+        misses = list_misses(truth.rag_questions, student.search_results, at)
+        counts: Counter[str] = Counter(miss.kind for miss in misses)
+        print(f"\nMisses at k={at}: {len(misses)} / {report.evaluated}")
+        for kind, hint in MISS_HINTS.items():
+            print(f"  {kind:<10} {counts.get(kind, 0):3d}  {hint}")
+        for miss in misses:
+            where = ""
+            if miss.rank is not None:
+                where = f" rank={miss.rank} iou={miss.best_iou:.3f}"
+            expected = miss.expected
+            print(
+                f"\n[{miss.kind}{where}] {miss.question}\n"
+                f"  expected {expected.file_path} "
+                f"[{expected.first_character_index}:"
+                f"{expected.last_character_index}]"
+            )

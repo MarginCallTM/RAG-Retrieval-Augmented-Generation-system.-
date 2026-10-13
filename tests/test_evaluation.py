@@ -1,6 +1,8 @@
 """Tests for src/evaluation.py."""
 
-from src.evaluation import evaluate_results, iou, question_recall
+from src.evaluation import (
+    diagnose, evaluate_results, iou, list_misses, question_recall,
+)
 from src.models import AnsweredQuestion, MinimalSearchResults, MinimalSource
 
 FILE = "data/raw/repo/a.md"
@@ -106,3 +108,39 @@ def test_empty_inputs_give_zero_without_crashing() -> None:
     report = evaluate_results([], [], ks=(1, 5))
     assert report.evaluated == 0
     assert report.recall == {1: 0.0, 5: 0.0}
+
+
+def test_diagnose_found_gives_no_miss() -> None:
+    question = answered("q1", span(0, 100))
+    assert diagnose(question, [span(0, 100)], k=1) == []
+
+
+def test_diagnose_late_when_found_after_k() -> None:
+    question = answered("q1", span(0, 100))
+    (miss,) = diagnose(question, [span(900, 999), span(0, 100)], k=1)
+    assert (miss.kind, miss.rank, miss.best_iou) == ("late", 2, 1.0)
+
+
+def test_diagnose_near_when_swallowed_by_a_big_chunk() -> None:
+    question = answered("q1", span(500, 600))
+    (miss,) = diagnose(question, [span(0, 2000)], k=1)
+    assert (miss.kind, miss.rank, miss.best_iou) == ("near", 1, 0.05)
+
+
+def test_diagnose_same_file_without_overlap() -> None:
+    question = answered("q1", span(0, 100))
+    (miss,) = diagnose(question, [span(100, 200), span(300, 400)], k=2)
+    assert (miss.kind, miss.rank, miss.best_iou) == ("same_file", 1, 0.0)
+
+
+def test_diagnose_wrong_file() -> None:
+    question = answered("q1", span(0, 100))
+    (miss,) = diagnose(question, [span(0, 100, "data/raw/repo/b.md")], k=1)
+    assert (miss.kind, miss.rank) == ("wrong_file", None)
+
+
+def test_list_misses_counts_an_absent_question_as_wrong_file() -> None:
+    truth = [answered("q1", span(0, 100)), answered("q2", span(0, 100))]
+    misses = list_misses(truth, [retrieved("q1", span(0, 100))], k=1)
+    assert [miss.question_id for miss in misses] == ["q2"]
+    assert misses[0].kind == "wrong_file"

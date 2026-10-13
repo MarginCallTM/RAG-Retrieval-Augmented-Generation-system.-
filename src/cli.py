@@ -9,13 +9,16 @@ import time
 from pathlib import Path
 
 from pydantic import ValidationError
+from tqdm import tqdm
 
+from src.datasets import MAX_CONTEXT_LENGTH, read_model, save_search_results
 from src.indexer import build_chunks, check_chunks, load_index, save_index
-from src.models import ChunkIndex
+from src.models import (
+    ChunkIndex, MinimalSearchResults, MinimalSource, RagDataset,
+    StudentSearchResults,
+)
 from src.retriever import Retriever
 
-# The moulinette rejects any source longer than this (max_context_length).
-MAX_CONTEXT_LENGTH = 2000
 # Below this, a chunk holds a few words and memory grows with the chunk
 # count: 650 MB at 50 characters, over 10 GB at 1.
 MIN_CHUNK_SIZE = 100
@@ -61,21 +64,21 @@ def parse_k(value: object) -> int:
 
 
 def load_retriever(processed_dir: str) -> Retriever:
-    """Load the index written by "index" and build a retriver on it.
+    """Load the index written by ``index`` and build a retriever on it.
 
     Raises:
         CliError: If the index is missing or cannot be parsed.
     """
     try:
         index = load_index(Path(processed_dir))
-    except FileExistsError:
+    except FileNotFoundError:
         raise CliError(
-            f"no index in {processed_dir}: run 'index' first"
+            f"no index in {processed_dir}: run `index` first"
         ) from None
     except (ValidationError, ValueError, OSError) as error:
         raise CliError(
-            f"could not load the index in {processed_dir}, run 'index' "
-            f"again {error}"
+            f"could not load the index in {processed_dir}, run `index` "
+            f"again: {error}"
         ) from error
     return Retriever(index)
 
@@ -177,19 +180,65 @@ class RagCli:
             print(f"rendered to {target}")
 
     def search_dataset(
-        self, dataset_path: str, k: int = 10, save_directory: str = "."
+        self,
+        dataset_path: str,
+        k: int = 10,
+        save_directory: str = "data/output/search_results",
+        processed_dir: str = "data/processed",
     ) -> None:
         """Run search over a whole dataset and write a results JSON file.
 
+        The output is named after the dataset file, so scope
+        ``save_directory`` by dataset: the public datasets share names.
+
         Args:
             dataset_path: Path to a dataset JSON file.
-            k: number of sources to return per question.
+            k: Number of sources to return per question.
             save_directory: Directory where the results file is written.
-            """
+            processed_dir: Directory holding the index written by ``index``.
+
+        Raises:
+            CliError: On an invalid k, an unreadable dataset, a missing
+                index, or an output the grader would reject.
+        """
+        top = parse_k(k)
+        source = Path(str(dataset_path))
+        try:
+            dataset = read_model(source, RagDataset)
+        except (OSError, ValueError) as error:
+            raise CliError(f"could not read the dataset: {error}") from error
+        retriever = load_retriever(processed_dir)
+
+        started = time.perf_counter()
+        results = [
+            MinimalSearchResults(
+                question_id=question.question_id,
+                question=question.question,
+                retrieved_sources=[
+                    MinimalSource(
+                        file_path=hit.chunk.file_path,
+                        first_character_index=hit.chunk.first_character_index,
+                        last_character_index=hit.chunk.last_character_index,
+                    )
+                    for hit in retriever.search(question.question, top)
+                ],
+            )
+            for question in tqdm(
+                dataset.rag_questions, desc="Searching", unit="question"
+            )
+        ]
+        elapsed = time.perf_counter() - started
+
+        student = StudentSearchResults(search_results=results, k=top)
+        try:
+            target = save_search_results(
+                student, Path(str(save_directory)) / source.name
+            )
+        except (ValueError, OSError) as error:
+            raise CliError(f"could not write the results: {error}") from error
         print(
-            "search_dataset: not implemented "
-            f"(dataset_path={dataset_path!r}, k={k},"
-            f"save_directory={save_directory!r})"
+            f"Searched {len(results)} questions (k={top}) "
+            f"in {elapsed:.1f}s -> {target}"
         )
 
     def answer(self, query: str, k: int = 5) -> None:

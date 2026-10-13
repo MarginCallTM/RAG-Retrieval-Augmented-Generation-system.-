@@ -12,10 +12,11 @@ from pydantic import ValidationError
 from tqdm import tqdm
 
 from src.datasets import MAX_CONTEXT_LENGTH, read_model, save_search_results
+from src.evaluation import evaluate_results
 from src.indexer import build_chunks, check_chunks, load_index, save_index
 from src.models import (
-    ChunkIndex, MinimalSearchResults, MinimalSource, RagDataset,
-    StudentSearchResults,
+    AnsweredDataset, ChunkIndex, MinimalSearchResults, MinimalSource,
+    RagDataset, StudentSearchResults,
 )
 from src.retriever import Retriever
 
@@ -271,11 +272,39 @@ class RagCli:
         """Report recall@k of a search results file against a dataset.
 
         Args:
-                student_search_results_path: Path to a search result JSON file.
-                dataset_path: Path to the ground-truth dataset JSON file.
+            student_search_results_path: Path to a search results JSON
+                file written by ``search_dataset``.
+            dataset_path: Path to the ground-truth dataset JSON file,
+                where every question carries its sources.
+
+        Raises:
+            CliError: If a file is missing or does not match its model.
         """
-        print(
-            "evaluate: not implemented"
-            f"(student_search_results_path={student_search_results_path!r}, "
-            f"dataset_path={dataset_path!r})"
-        )
+        try:
+            student = read_model(
+                Path(str(student_search_results_path)), StudentSearchResults
+            )
+            truth = read_model(Path(str(dataset_path)), AnsweredDataset)
+        except (OSError, ValueError) as error:
+            raise CliError(f"could not read the inputs: {error}") from error
+
+        report = evaluate_results(truth.rag_questions, student.search_results)
+        if report.missing_ids:
+            print(
+                f"warning: {len(report.missing_ids)} question(s) have no "
+                "results in the file, counted as misses"
+            )
+        if report.unknown_ids:
+            print(
+                f"warning: {len(report.unknown_ids)} result(s) match no "
+                "question of the dataset, ignored"
+            )
+        largest = max(report.recall)
+        if student.k < largest:
+            print(
+                f"warning: the file holds at most k={student.k} sources per "
+                f"question, recall@{largest} is capped by that"
+            )
+        print(f"Questions evaluated: {report.evaluated}")
+        for k, value in report.recall.items():
+            print(f"recall@{k}: {value:.3f} ({value:.1%})")

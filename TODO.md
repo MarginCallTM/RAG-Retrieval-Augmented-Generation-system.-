@@ -2,8 +2,8 @@
 
 Step-by-step guideline derived from `CLAUDE.md` (roadmap, section 5) and the subject
 (`en.subject _rag.pdf`, v2.0). Tick boxes as we go; this file is the single source of
-truth for "where are we". It is git-ignored (`*.md` except `README.md`): it is a working
-note, not a deliverable.
+truth for "where are we". It is committed since 2026-10-12 (to carry the context across
+machines) but it is a working note, not a deliverable.
 
 Legend: `[ ]` not started · `[~]` in progress · `[x]` done and understood.
 
@@ -20,18 +20,21 @@ done until those questions are answered without notes, whatever the code says.
 | 0 | Project setup | `[x]` |
 | 1 | Explore corpus and datasets | `[x]` (concept check pending in "To revisit") |
 | 2 | Pydantic data models | `[x]` |
-| 3 | Ingestion and chunking | `[x]` (commit pending) |
-| 4 | Lexical index and scorer | `[ ]` |
-| 5 | `search_dataset` + `evaluate` (recall@k) | `[ ]` |
+| 3 | Ingestion and chunking | `[x]` |
+| 4 | Lexical index and scorer | `[x]` (BM25 via `rank_bm25`, 2026-10-12) |
+| 5 | `search_dataset` + `evaluate` (recall@k) | `[x]` 2026-10-13, `evaluate` matches the moulinette exactly |
 | 6 | Iteration loop (tune retrieval) | `[ ]` |
 | 7 | Generation with Qwen3-0.6B | `[ ]` |
 | 8 | CLI hardening | `[ ]` |
 | 9 | README | `[ ]` |
 | 10 | Bonuses | `[ ]` |
 
-**Last measured recall@5:** docs — · code —
+**Last measured recall@5:** docs **80.0 %** · code **68.7 %** (2026-10-13, baseline:
+chunks 2000, BM25 k1=1.5 b=0.75, k=10; recall@1/3/5/10 docs 60/76/80/84, code
+45.5/58.6/68.7/74.7; confirmed by the moulinette). Docs is exactly on the threshold.
 **Last measured indexing time:** 2.2 s (12 554 chunks, max 2000, 2026-09-29)
-**Last measured retrieval time (200 questions):** —
+**Last measured retrieval time (200 questions):** ≈ 20 s (2026-10-13: index load +
+tokenising ≈ 4 s per command, search 5.1 s docs / 6.3 s code, k=10; budget 90 s)
 
 ---
 
@@ -302,30 +305,39 @@ Goal: `search "..." --k 5` returns plausible source locations in milliseconds.
 - [ ] 4.a.3 BM25: saturation (`k1`), length normalisation (`b`), what each changes here
 - [ ] 4.a.4 Inverted index and posting lists: why lookup is not a scan
 - [ ] 4.a.5 The vocabulary-mismatch tension (paraphrase vs verbatim identifier)
-- [ ] 4.a.6 **Decision:** TF-IDF or BM25 first (record the reasoning; the other can come
-  in stage 6 as a comparison)
+- [x] 4.a.6 **Decision (2026-10-12):** BM25 first, from the `rank_bm25` library
+  (`BM25Okapi`, k1=1.5, b=0.75). Allowed by the subject; own implementation kept as a
+  possible stage 6 / recode exercise. TF-IDF as a comparison in stage 6 if time allows.
 
 ### 4.b Tokeniser (`src/tokenizer.py`)
-- [ ] 4.b.1 Baseline: lowercase, split on non-alphanumerics
-- [ ] 4.b.2 Identifier splitting: `snake_case` and `CamelCase` → sub-tokens, **while
-  keeping the original token too**
-- [ ] 4.b.3 Decide on stopwords (cost on docs vs code), stemming (yes/no, cost)
-- [ ] 4.b.4 Same tokeniser used at index time and query time (single function, tested)
+- [x] 4.b.1 Baseline: lowercase, `[A-Za-z0-9_]+`
+- [x] 4.b.2 Identifier splitting: `snake_case` and `CamelCase` → sub-tokens, **while
+  keeping the original token too** (`get_model_config` → whole + get, model, config)
+- [~] 4.b.3 Stopwords: none (IDF already zeroes a term in half the corpus, e.g.
+  "scheduler" in 2/4 test chunks). Stemming: none. Both are stage 6 experiments.
+- [x] 4.b.4 Same tokeniser used at index time and query time (single function, tested)
 
-### 4.c Index (`src/index.py`)
-- [ ] 4.c.1 Build the inverted index: `term -> list[(chunk_id, tf)]`, plus
-  `df[term]`, chunk lengths, average chunk length
-- [ ] 4.c.2 Persist alongside the chunks in `data/processed/`
-- [ ] 4.c.3 tqdm on tokenising
+### 4.c Index
+- [x] 4.c.1 Inverted index, df, lengths: built in memory by `rank_bm25` at
+  `Retriever` construction (4 s for 12 554 chunks). Not persisted: `data/processed/`
+  only holds the chunks; rebuilding is cheaper than loading for now.
+- [x] 4.c.3 tqdm on tokenising
 
 ### 4.d Scorer (`src/retriever.py`)
-- [ ] 4.d.1 Implement the chosen scorer (BM25 or TF-IDF) over posting lists
-- [ ] 4.d.2 Return top-k `ScoredChunk`, ties broken deterministically
-- [ ] 4.d.3 Handle: empty query, query with zero known terms, `k=0`, `k > n_chunks`
-- [ ] 4.d.4 Wire the `search` CLI command; output format like the subject screenshot
-  (`path [first:last]`)
-- [ ] 4.d.5 Sanity-check on 5 questions from stage 1 by eye
-- [ ] 4.d.6 Commit
+- [x] 4.d.1 `Retriever(index, k1, b)` wraps `BM25Okapi`
+- [x] 4.d.2 Top-k `ScoredChunk`, stable argsort → ties broken by chunk order
+- [x] 4.d.3 Empty query, unknown terms, `k<=0`, `k > n_chunks`: all return `[]`;
+  a chunk with score 0 is never a result
+- [x] 4.d.4 `search <query> --k` prints `rank. path [first:last] score=`
+- [x] 4.d.5 LoRA question checked by eye with `--render_path` (personal debug option:
+  writes a JSON with the chunk texts and the per-term score contributions)
+- [x] 4.d.6 Commits 48d744f, e1eb31a, 216ed0d, b0ac3a8 (2026-10-12)
+
+Findings (2026-10-12, `render.json` on the LoRA question): `LoRA` is split into
+`lora, lo, ra` and `vLLM` into `vllm, v, llm` by the CamelCase regex; `lo`/`ra` weigh
+more than `lora` itself because `lora` also appears in code identifiers (lower IDF).
+`how` is not near-zero IDF on this code-heavy corpus. Both are stage 6 experiments.
+Timing: load_index 0.4 s, Retriever build 4.1 s, 200 searches 3.5 s.
 
 **Concept check**
 - Why is IDF a logarithm? What would happen with a linear IDF on this corpus?
@@ -339,24 +351,39 @@ Goal: `search "..." --k 5` returns plausible source locations in milliseconds.
 Goal: I get a recall@k number I trust, in seconds, without the moulinette.
 **Do not touch chunking or scoring parameters before this stage is done.**
 
-- [ ] 5.1 Concept pass: recall@k vs precision@k, why recall here, why
-  recall@1 ≤ recall@5 ≤ recall@10 by construction
-- [ ] 5.2 `search_dataset --dataset_path --k --save_directory`: load `RagDataset`,
+- [x] 5.1 Concept pass: recall@k vs precision@k, why recall here, why
+  recall@1 ≤ recall@5 ≤ recall@10 by construction (2026-10-13)
+- [x] 5.2 `search_dataset --dataset_path --k --save_directory`: load `RagDataset`,
   run retrieval on every question (tqdm), write a `StudentSearchResults` JSON to
   `<save_directory>/<dataset filename>`; create the directory if missing
-- [ ] 5.3 Enforce output invariants before writing: path prefix `data/raw/`, every
+- [x] 5.3 Enforce output invariants before writing: path prefix `data/raw/`, every
   source `<= 2000` chars, at most `k` sources per question
-- [ ] 5.4 `evaluate --student_search_results_path --dataset_path`: my own recall@k
+
+Increment 1 (2026-10-13): `src/datasets.py` (`read_model`, `check_search_results`,
+`save_search_results` atomic), `search_dataset` in `cli.py`, `tests/test_datasets.py`.
+Outputs in `data/output/search_results/UnansweredQuestions/dataset_{docs,code}_public.json`
+(k=10). Abuse checked: missing file, wrong schema, `--k abc` → clean error, exit 1.
+- [x] 5.4 `evaluate --student_search_results_path --dataset_path`: my own recall@k
   implementation with the grader rule — same file **and** IoU > 0.05 on
-  `[first, last]` — reporting recall@1/3/5/10
-- [ ] 5.5 Write the IoU function with a unit test on: identical spans, disjoint spans,
+  `[first, last[` — reporting recall@1/3/5/10
+- [x] 5.5 Write the IoU function with a unit test on: identical spans, disjoint spans,
   touching spans, one span containing the other, spans in different files
-- [ ] 5.6 Match questions by `question_id`, warn (not crash) on missing ids
-- [ ] 5.7 Cross-check my `evaluate` against the moulinette on the same output file: the
+- [x] 5.6 Match questions by `question_id`, warn (not crash) on missing ids
+- [x] 5.7 Cross-check my `evaluate` against the moulinette on the same output file: the
   numbers must match. If they don't, my implementation is wrong, not theirs.
-- [ ] 5.8 Time `search_dataset` on 200 questions (must be < 90 s including index load)
-- [ ] 5.9 Record baseline recall@5 (docs / code) at the top of this file
-- [ ] 5.10 Commit
+
+Increment 2 (2026-10-13): `src/evaluation.py` (`iou`, `is_found`, `question_recall`,
+`evaluate_results` → `RecallReport`), `tests/test_evaluation.py` (12 tests), `evaluate`
+in `cli.py` loads the ground truth with `AnsweredDataset` (an Unanswered file is refused:
+200 validation errors, not a silent 0 %). The moulinette is in `notes/` (two Linux
+binaries, Fire CLI: `evaluate_student_search_results`, `list_valid_questions`); it is
+git-ignored and never called from the code. All 8 numbers match it exactly.
+Rule details confirmed: `last` exclusive, threshold strict (100/2000 = 0.05 is lost,
+101/2000 is found), denominator = questions with sources.
+- [x] 5.8 Time `search_dataset` on 200 questions: ≈ 20 s including index load
+  (2026-10-13), budget 90 s
+- [x] 5.9 Record baseline recall@5 (docs / code) at the top of this file
+- [x] 5.10 Commit (2026-10-13)
 
 **Concept check**
 - What exactly does recall@5 measure here, and why not precision?

@@ -382,15 +382,21 @@ The project is finished when all of the following are true, in this order of imp
 
 _Update at the end of each session._
 
-- **Stage:** 3 done (commit pending): `index` chunks 1 205 files into 12 554 chunks in
-  2.2 s and writes `data/processed/chunks.json`. Next: stage 4, tokeniser + BM25.
-- **Last measured recall@5:** docs —, code —.
+- **Stage:** 5 done (2026-10-13). `index`, `search`, `search_dataset`, `evaluate`
+  work; `evaluate` matches the moulinette on all 8 numbers. Next: stage 6, the
+  measured iteration loop (`notes/experiments.md`, error analysis of the misses first).
+- **Last measured recall@5:** docs 80.0 %, code 68.7 % (baseline: chunks 2000,
+  `rank_bm25` BM25Okapi k1=1.5 b=0.75, no stopwords, no stemming). Docs sits exactly
+  on the threshold: stage 6 must buy margin. Retrieval: ≈ 20 s for 200 questions.
 - **Decided:** index `.py`, `.md`, `.txt`, excluding `tests/` and `benchmarks/` (1 205
   files); read UTF-8 strict in text mode; tokeniser keeps identifiers whole AND split
-  (docs 18 % / code 77 % of questions quote an identifier); `evaluate` loads the ground
-  truth with `AnsweredDataset`.
+  (docs 18 % / code 77 % of questions quote an identifier); BM25 from the `rank_bm25`
+  library (own implementation kept as a possible recode exercise); `evaluate` loads
+  the ground truth with `AnsweredDataset`; the moulinette lives in `notes/`, is
+  git-ignored and is only run by hand as the cross-check.
 - **Open decisions:** chunk size (< 2000 likely, see `notes/corpus.md` section 6);
-  TF-IDF vs BM25; own BM25 vs library (allowed by the subject, own code favoured
-  for the recode exercise).
+  CamelCase split noise (`LoRA` → lo, ra; `vLLM` → v, llm); stopwords; `examples/` and
+  hidden dirs in the corpus. All to be measured in stage 6, one at a time.
 - **Notes:** 2026-09-29, teaching contract lightened (section 3): no explain-back, no
-  quizzes, Claude edits the code directly.
+  quizzes. 2026-10-12: code is shown in the chat and retyped by hand; Claude reads it
+  back, reviews, and edits directly only when asked.

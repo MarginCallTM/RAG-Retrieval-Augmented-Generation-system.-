@@ -451,22 +451,25 @@ Goal: `answer` and `answer_dataset` produce valid, grounded, structured output.
 - [ ] 7.a.5 Explain back in my own words
 
 ### 7.b Implementation
-- [ ] 7.b.1 Add `transformers` + `torch` (CPU) to dependencies; check disk space
-  (several GB); model download must be lazy and only happen on `answer*` commands,
-  never on `index`/`search`
-- [ ] 7.b.2 `src/generator.py`: load model and tokenizer once (context manager or
-  cached singleton), CPU-only, graceful error if the download fails or is offline
-- [ ] 7.b.3 Prompt template: system instruction ("answer only from the sources, say
-  'I don't know' otherwise"), numbered sources with file paths, the question
-- [ ] 7.b.4 Context budget: count tokens per source, include sources in rank order until
-  the budget is hit, truncate the last one if needed
-- [ ] 7.b.5 Qwen3 specifics: disable the thinking mode or strip `<think>` blocks from
-  the output; set max new tokens; deterministic decoding
-- [ ] 7.b.6 `answer <query> --k`: retrieve then generate, print the answer and the
-  sources used
-- [ ] 7.b.7 `answer_dataset --student_search_results_path --save_directory`: read a
-  `StudentSearchResults`, re-read each source span from disk, generate (tqdm), write
-  `StudentSearchResultsAndAnswer` JSON scoped by dataset
+- [x] 7.b.1 `transformers` + `torch` added (2026-10-14). torch from PyPI with CUDA:
+  the project runs on the Lenovo with an RTX 4050; CPU fallback in code. Disk: the
+  CUDA stack is 4.5 GB → project and caches moved to the goinfre (`relocate.md`).
+  torch is imported lazily inside `Generator`: `index`/`search` never load it.
+- [x] 7.b.2 `src/generator.py`: `Generator` loads tokenizer + model once; download
+  or load errors become a `CliError` with a hint about the network
+- [x] 7.b.3 Prompt: system rules (sources only, "I don't know." otherwise, copy
+  commands in full in a code block, cite, be concise), numbered sources with paths,
+  then the question (`build_messages`)
+- [x] 7.b.4 Context budget: `fit_sources`, 3 000 tokens, rank order, stop at the first
+  chunk that does not fit, truncate only if the first one is too long. Measured: 5
+  docs chunks ≈ 3 000 tokens (≈ 600 each, not 500).
+- [x] 7.b.5 Qwen3: `enable_thinking=False`, `max_new_tokens=256`, greedy decoding
+- [x] 7.b.6 `answer <query> --k`: retrieve (fails fast without index), load model,
+  print answer + sources kept + generation time
+- [x] 7.b.7 `answer_dataset --student_search_results_path --save_directory
+  [--limit N]`: `load_chunk` re-reads spans from disk, `MinimalAnswer` per question,
+  `StudentSearchResultsAndAnswer` written atomically under the same file name.
+  Checked with `--limit 3` on docs (72 s per answer on CPU).
 - [ ] 7.b.8 Manually review 10 answers per dataset for coherence / grounding / on point
 - [ ] 7.b.9 Commit
 

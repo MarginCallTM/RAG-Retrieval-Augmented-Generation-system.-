@@ -382,12 +382,16 @@ The project is finished when all of the following are true, in this order of imp
 
 _Update at the end of each session._
 
-- **Stage:** 5 done (2026-10-13). `index`, `search`, `search_dataset`, `evaluate`
-  work; `evaluate` matches the moulinette on all 8 numbers. Next: stage 6, the
-  measured iteration loop (`notes/experiments.md`, error analysis of the misses first).
-- **Last measured recall@5:** docs 80.0 %, code 68.7 % (baseline: chunks 2000,
-  `rank_bm25` BM25Okapi k1=1.5 b=0.75, no stopwords, no stemming). Docs sits exactly
-  on the threshold: stage 6 must buy margin. Retrieval: ≈ 20 s for 200 questions.
+- **Stage:** 7 in progress (2026-10-14). Stages 0–6 done. `answer` and
+  `answer_dataset` work with Qwen3-0.6B (checked on 3 docs questions: 2 right, 1
+  wrong on a retrieval miss where the model did not abstain). Pending: full
+  `answer_dataset` runs on GPU, manual review of 10 answers per dataset, abstention
+  guard, citation wording. See `relocate.md` for the move to the goinfre and the
+  exact resume point.
+- **Last measured recall@5:** docs 85.0 %, code 75.8 % (chunks 2000, BM25 k1=1.5
+  b=0.5, stopwords, one-char CamelCase pieces dropped). Baseline was 80.0 / 68.7.
+  Retrieval ≈ 45 s for 200 questions on this laptop. Generation on CPU ≈ 72 s per
+  answer, hence the GPU (RTX 4050) and the PyPI CUDA build of torch.
 - **Decided:** index `.py`, `.md`, `.txt`, excluding `tests/` and `benchmarks/` (1 205
   files); read UTF-8 strict in text mode; tokeniser keeps identifiers whole AND split
   (docs 18 % / code 77 % of questions quote an identifier); BM25 from the `rank_bm25`

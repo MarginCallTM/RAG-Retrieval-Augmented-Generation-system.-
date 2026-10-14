@@ -10,7 +10,7 @@ from typing import Type, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
-from src.models import StudentSearchResults
+from src.models import Chunk, MinimalSource, StudentSearchResults
 
 # Every corpus path starts with this, verbatim, like the dataset paths.
 CORPUS_PREFIX = "data/raw/"
@@ -74,6 +74,23 @@ def check_search_results(
                 )
 
 
+def save_model(model: BaseModel, target: Path) -> Path:
+    """Write ``model`` as indented JSON to ``target``, atomically.
+
+    The file is written under a temporary name and renamed at the end,
+    so a crash mid-write never leaves a half JSON file behind.
+
+    Raises:
+        OSError: If the file cannot be written.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".tmp")
+    with open(temporary, "w", encoding="utf-8") as handle:
+        handle.write(model.model_dump_json(indent=2))
+    temporary.replace(target)
+    return target
+
+
 def save_search_results(student: StudentSearchResults, target: Path) -> Path:
     """Check ``student`` and write it to ``target``, atomically.
 
@@ -82,9 +99,33 @@ def save_search_results(student: StudentSearchResults, target: Path) -> Path:
         OSError: If the file cannot be written.
     """
     check_search_results(student)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name(target.name + ".tmp")
-    with open(temporary, "w", encoding="utf-8") as handle:
-        handle.write(student.model_dump_json(indent=2))
-    temporary.replace(target)
-    return target
+    return save_model(student, target)
+
+
+def load_chunk(source: MinimalSource) -> Chunk:
+    """Re-read the text of ``source`` from the corpus on disk.
+
+    The results files only carry paths and offsets; generation needs the
+    text. The path is relative to the repository root, like every corpus
+    path, so this runs from there.
+
+    Raises:
+        OSError: If the file cannot be read.
+        ValueError: If the offsets fall outside the file.
+    """
+    with open(source.file_path, encoding="utf-8") as handle:
+        content = handle.read()
+    if source.last_character_index > len(content):
+        raise ValueError(
+            f"{source.file_path}: span [{source.first_character_index}:"
+            f"{source.last_character_index}] exceeds the file "
+            f"({len(content)} characters)"
+        )
+    return Chunk(
+        file_path=source.file_path,
+        first_character_index=source.first_character_index,
+        last_character_index=source.last_character_index,
+        text=content[
+            source.first_character_index:source.last_character_index
+        ],
+    )

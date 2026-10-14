@@ -8,16 +8,22 @@ into a clean message by ``src/__main__.py``, never into a traceback.
 import time
 from collections import Counter
 from pathlib import Path
+from typing import List
 
 from pydantic import ValidationError
 from tqdm import tqdm
 
-from src.datasets import MAX_CONTEXT_LENGTH, read_model, save_search_results
+from src.datasets import (
+    MAX_CONTEXT_LENGTH, load_chunk, read_model, save_model,
+    save_search_results,
+)
 from src.evaluation import MISS_HINTS, evaluate_results, list_misses
+from src.generator import DEFAULT_MODEL, Generator
 from src.indexer import build_chunks, check_chunks, load_index, save_index
 from src.models import (
-    AnsweredDataset, ChunkIndex, MinimalSearchResults, MinimalSource,
-    RagDataset, StudentSearchResults,
+    AnsweredDataset, ChunkIndex, MinimalAnswer, MinimalSearchResults,
+    MinimalSource, RagDataset, StudentSearchResults,
+    StudentSearchResultsAndAnswer,
 )
 from src.retriever import Retriever
 
@@ -83,6 +89,24 @@ def load_retriever(processed_dir: str) -> Retriever:
             f"again: {error}"
         ) from error
     return Retriever(index)
+
+
+def load_generator(model_name: str) -> Generator:
+    """Load the generation model, with a clean error when it cannot be.
+
+    Raises:
+        CliError: If the model is not found, not downloadable (offline),
+            or does not fit in memory.
+    """
+    print(f"Loading {model_name}...", flush=True)
+    try:
+        return Generator(model_name)
+    except (OSError, ValueError, RuntimeError) as error:
+        raise CliError(
+            f"could not load the model {model_name!r}: {error}\n"
+            "The first run downloads it from Hugging Face (about 1.5 GB) "
+            "and needs the network."
+        ) from error
 
 
 class RagCli:
@@ -243,28 +267,114 @@ class RagCli:
             f"in {elapsed:.1f}s -> {target}"
         )
 
-    def answer(self, query: str, k: int = 5) -> None:
-        """Answer a single query using the retrieved context.
+    def answer(
+        self,
+        query: str,
+        k: int = 5,
+        processed_dir: str = "data/processed",
+        model_name: str = DEFAULT_MODEL,
+    ) -> None:
+        """Answer a single query from the top-k retrieved chunks.
 
         Args:
             query: The question to answer.
             k: Number of sources to retrieve before answering.
+            processed_dir: Directory holding the index written by ``index``.
+            model_name: Hugging Face model id or local directory.
+
+        Raises:
+            CliError: On an invalid k, a missing index, or a model that
+                cannot be loaded.
         """
-        print(f"answer: not implemented (query= {query!r}, k={k})")
+        top = parse_k(k)
+        text = str(query)
+        # Retrieve before loading the model: a missing index fails in
+        # 0.4 s instead of after a 1.5 GB download.
+        retriever = load_retriever(processed_dir)
+        results = retriever.search(text, top)
+        generator = load_generator(str(model_name))
+        chunks = generator.select([result.chunk for result in results])
+
+        started = time.perf_counter()
+        answer = generator.generate(text, chunks)
+        elapsed = time.perf_counter() - started
+        print(answer)
+        print(f"\nSources ({len(chunks)} of {len(results)} retrieved, "
+              f"generated in {elapsed:.1f}s):")
+        for number, chunk in enumerate(chunks, start=1):
+            print(
+                f"[{number}] {chunk.file_path} "
+                f"[{chunk.first_character_index}:"
+                f"{chunk.last_character_index}]"
+            )
 
     def answer_dataset(
-        self, student_search_results_path: str, save_directory: str = "."
+        self,
+        student_search_results_path: str,
+        save_directory: str = "data/output/search_results_and_answer",
+        model_name: str = DEFAULT_MODEL,
+        limit: int = 0,
     ) -> None:
-        """Generate answers for every question of a search results file.
+        """Generate an answer for every question of a search results file.
+
+        The output keeps the retrieved sources and adds the answer, under
+        the same file name, so scope ``save_directory`` by dataset.
 
         Args:
-            student_search_results_path: Path to a search results JSON file.
+            student_search_results_path: Path to a search results JSON
+                file written by ``search_dataset``.
             save_directory: Directory where the answers file is written.
+            model_name: Hugging Face model id or local directory.
+            limit: If positive, only answer the first ``limit`` questions
+                (for prompt experiments: a full dataset takes over an
+                hour on CPU).
+
+        Raises:
+            CliError: On an unreadable results file, a source that cannot
+                be read from the corpus, or a model that cannot be loaded.
         """
+        source = Path(str(student_search_results_path))
+        try:
+            student = read_model(source, StudentSearchResults)
+        except (OSError, ValueError) as error:
+            raise CliError(f"could not read the results: {error}") from error
+        results = student.search_results[:parse_k(limit) or None]
+        generator = load_generator(str(model_name))
+
+        started = time.perf_counter()
+        answers: List[MinimalAnswer] = []
+        for result in tqdm(results, desc="Answering", unit="question"):
+            try:
+                chunks = [load_chunk(s) for s in result.retrieved_sources]
+            except (OSError, ValueError) as error:
+                raise CliError(
+                    f"could not read a source of question "
+                    f"{result.question_id}: {error} (run from the "
+                    "repository root, with data/raw/ in place)"
+                ) from error
+            text = generator.generate(
+                result.question, generator.select(chunks)
+            )
+            answers.append(MinimalAnswer(
+                question_id=result.question_id,
+                question=result.question,
+                retrieved_sources=result.retrieved_sources,
+                answer=text,
+            ))
+        elapsed = time.perf_counter() - started
+
+        output = StudentSearchResultsAndAnswer(
+            search_results=answers, k=student.k
+        )
+        try:
+            target = save_model(
+                output, Path(str(save_directory)) / source.name
+            )
+        except OSError as error:
+            raise CliError(f"could not write the answers: {error}") from error
         print(
-            "answer_dataset: not implemented "
-            f"(student_search_result_path={student_search_results_path!r}, "
-            f"save_directory={save_directory!r})"
+            f"Answered {len(answers)} questions in {elapsed:.0f}s "
+            f"({elapsed / max(len(answers), 1):.1f}s each) -> {target}"
         )
 
     def evaluate(

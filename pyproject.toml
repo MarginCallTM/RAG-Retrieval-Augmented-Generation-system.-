@@ -8,6 +8,8 @@ dependencies = [
 	"fire>=0.7",
 	"tqdm>=4.66",
 	"rank-bm25>=0.2.2",
+	"torch>=2.4",
+	"transformers>=4.51",
 ]
 
 [dependency-groups]
@@ -17,8 +19,21 @@ dev = [
 	"pytest>=8.0",
 ]
 
+# torch comes from PyPI with CUDA bundled (about 3 GB): the project is
+# run and defended on a laptop with an RTX 4050, where generation is
+# 20x faster than on its CPU. The code falls back to CPU when no GPU is
+# available, so `uv sync` on a CPU-only machine still works.
+
 [tool.mypy]
 exclude = '^(data|notes|\.venv)/'
+
+# torch and transformers ship their own type information, so mypy would
+# analyse both packages in full (tens of thousands of files, several
+# minutes on a cold cache). Their symbols are treated as Any instead;
+# src/generator.py converts what it returns explicitly.
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "transformers", "transformers.*"]
+follow_imports = "skip"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

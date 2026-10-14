@@ -4,7 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from src.datasets import check_search_results, read_model, save_search_results
+from src.datasets import (
+    check_search_results, load_chunk, read_model, save_search_results,
+)
 from src.models import (
     MinimalSearchResults, MinimalSource, RagDataset, StudentSearchResults,
 )
@@ -72,6 +74,35 @@ def test_read_model_errors(tmp_path: Path) -> None:
     wrong_schema.write_text('{"questions": []}', encoding="utf-8")
     with pytest.raises(ValueError, match="does not match RagDataset"):
         read_model(wrong_schema, RagDataset)
+
+
+def test_load_chunk_slices_the_original_file(tmp_path: Path) -> None:
+    path = tmp_path / "a.md"
+    path.write_text("# Title\n\nSome text here.\n", encoding="utf-8")
+    source = MinimalSource(
+        file_path=str(path), first_character_index=9,
+        last_character_index=19,
+    )
+    chunk = load_chunk(source)
+    assert chunk.text == "Some text "
+    assert (chunk.file_path, chunk.last_character_index) == (str(path), 19)
+
+
+def test_load_chunk_errors(tmp_path: Path) -> None:
+    missing = MinimalSource(
+        file_path=str(tmp_path / "missing.md"), first_character_index=0,
+        last_character_index=5,
+    )
+    with pytest.raises(OSError):
+        load_chunk(missing)
+    path = tmp_path / "short.md"
+    path.write_text("abc", encoding="utf-8")
+    beyond = MinimalSource(
+        file_path=str(path), first_character_index=0,
+        last_character_index=10,
+    )
+    with pytest.raises(ValueError, match="exceeds the file"):
+        load_chunk(beyond)
 
 
 def test_real_datasets_load() -> None:

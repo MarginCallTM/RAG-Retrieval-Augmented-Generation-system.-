@@ -56,18 +56,22 @@ def parse_chunk_size(value: object) -> int:
     return value
 
 
-def parse_k(value: object) -> int:
-    """Validate "--k"" as given by fire: a non-negative integer.
+def parse_k(value: object, option: str = "--k") -> int:
+    """Validate a count option as given by fire: a non-negative integer.
 
-    "k=0" is allowed and returns nothing, like a search with no match.
+    ``k=0`` is allowed and returns nothing, like a search with no match.
+
+    Args:
+        value: The raw value from fire.
+        option: The option name, for the error message.
 
     Raises:
         CliError: if the value is not an integer or is negative.
     """
     if isinstance(value, bool) or not isinstance(value, int):
-        raise CliError(f"--k must be an integer, got {value!r}")
+        raise CliError(f"{option} must be an integer, got {value!r}")
     if value < 0:
-        raise CliError(f"--k must be >= 0, got {value}")
+        raise CliError(f"{option} must be >= 0, got {value}")
     return value
 
 
@@ -83,7 +87,13 @@ def load_retriever(processed_dir: str) -> Retriever:
         raise CliError(
             f"no index in {processed_dir}: run `index` first"
         ) from None
-    except (ValidationError, ValueError, OSError) as error:
+    except ValidationError as error:
+        # str(error) is a multi-line dump ending with a pydantic URL.
+        raise CliError(
+            f"the index in {processed_dir} is not valid "
+            f"({error.error_count()} validation error(s)): run `index` again"
+        ) from error
+    except (ValueError, OSError) as error:
         raise CliError(
             f"could not load the index in {processed_dir}, run `index` "
             f"again: {error}"
@@ -338,7 +348,7 @@ class RagCli:
             student = read_model(source, StudentSearchResults)
         except (OSError, ValueError) as error:
             raise CliError(f"could not read the results: {error}") from error
-        results = student.search_results[:parse_k(limit) or None]
+        results = student.search_results[:parse_k(limit, "--limit") or None]
         generator = load_generator(str(model_name))
 
         started = time.perf_counter()
@@ -396,8 +406,12 @@ class RagCli:
             misses_at: The k at which misses are listed.
 
         Raises:
-            CliError: If a file is missing or does not match its model.
+            CliError: If a file is missing or does not match its model, or
+                on an invalid misses_at.
         """
+        # Validate every argument before any work, so a typo in the last
+        # option fails at once rather than after the report.
+        at = parse_k(misses_at, "--misses_at")
         try:
             student = read_model(
                 Path(str(student_search_results_path)), StudentSearchResults
@@ -429,7 +443,6 @@ class RagCli:
 
         if not show_misses:
             return
-        at = parse_k(misses_at)
         misses = list_misses(truth.rag_questions, student.search_results, at)
         counts: Counter[str] = Counter(miss.kind for miss in misses)
         print(f"\nMisses at k={at}: {len(misses)} / {report.evaluated}")

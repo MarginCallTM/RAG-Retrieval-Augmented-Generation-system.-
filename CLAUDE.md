@@ -382,25 +382,31 @@ The project is finished when all of the following are true, in this order of imp
 
 _Update at the end of each session._
 
-- **Stage:** 7 in progress (2026-10-14). Stages 0–6 done. `answer` and
-  `answer_dataset` work with Qwen3-0.6B (checked on 3 docs questions: 2 right, 1
-  wrong on a retrieval miss where the model did not abstain). Pending: full
-  `answer_dataset` runs on GPU, manual review of 10 answers per dataset, abstention
-  guard, citation wording. See `relocate.md` for the move to the goinfre and the
-  exact resume point.
+- **Stage:** 8 in progress (2026-10-14). Stages 0–7 done. The project lives in
+  `/goinfre/acombier/RAG` with torch CUDA on the RTX 4050; both datasets answered
+  on GPU (docs 9.6 s / code 6.4 s per question), 10 answers per dataset reviewed
+  with `notes/review_answers.py`. Decided: no prompt rework, no abstention guard;
+  both defects (the model copies the `[1] path` label 2/10, never abstains on a
+  retrieval miss 10/100) are documented in the README "Challenges". Stage 8:
+  `notes/abuse.sh` runs 50 cases without the model → 0 traceback; 3 message fixes
+  in `cli.py` (corrupt index one-liner, `evaluate` validates `--misses_at` before
+  working, `parse_k` names the real option). Pending: the 10 model cases of the
+  script, Ctrl+C by hand, decision on a top-level catch-all (8.2), commit. Then
+  stage 9 README.
 - **Last measured recall@5:** docs 85.0 %, code 75.8 % (chunks 2000, BM25 k1=1.5
   b=0.5, stopwords, one-char CamelCase pieces dropped). Baseline was 80.0 / 68.7.
-  Retrieval ≈ 45 s for 200 questions on this laptop. Generation on CPU ≈ 72 s per
-  answer, hence the GPU (RTX 4050) and the PyPI CUDA build of torch.
+  Indexing 23 s and retrieval ≈ 45 s for 200 questions on this laptop (budgets 300
+  and 90 s). Generation has no budget in the subject.
 - **Decided:** index `.py`, `.md`, `.txt`, excluding `tests/` and `benchmarks/` (1 205
   files); read UTF-8 strict in text mode; tokeniser keeps identifiers whole AND split
   (docs 18 % / code 77 % of questions quote an identifier); BM25 from the `rank_bm25`
   library (own implementation kept as a possible recode exercise); `evaluate` loads
   the ground truth with `AnsweredDataset`; the moulinette lives in `notes/`, is
   git-ignored and is only run by hand as the cross-check.
-- **Open decisions:** chunk size (< 2000 likely, see `notes/corpus.md` section 6);
-  CamelCase split noise (`LoRA` → lo, ra; `vLLM` → v, llm); stopwords; `examples/` and
-  hidden dirs in the corpus. All to be measured in stage 6, one at a time.
+- **Open decisions:** 8.2 catch-all in `__main__` (hides bugs vs. no traceback
+  ever); whether `relocate.md` is deleted or kept as a log at the next commit.
+  Retrieval ideas left for the README "with another week" paragraph: acronym split
+  rule, packing small Markdown sibling sections, `k1` sweep.
 - **Notes:** 2026-09-29, teaching contract lightened (section 3): no explain-back, no
   quizzes. 2026-10-12: code is shown in the chat and retyped by hand; Claude reads it
   back, reviews, and edits directly only when asked.

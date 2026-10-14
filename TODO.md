@@ -29,9 +29,10 @@ done until those questions are answered without notes, whatever the code says.
 | 9 | README | `[ ]` |
 | 10 | Bonuses | `[ ]` |
 
-**Last measured recall@5:** docs **80.0 %** · code **68.7 %** (2026-10-13, baseline:
-chunks 2000, BM25 k1=1.5 b=0.75, k=10; recall@1/3/5/10 docs 60/76/80/84, code
-45.5/58.6/68.7/74.7; confirmed by the moulinette). Docs is exactly on the threshold.
+**Last measured recall@5:** docs **85.0 %** · code **75.8 %** (2026-10-14, after
+stopwords + MIN_PIECE=2 + b=0.5; chunks 2000, BM25 k1=1.5, k=10; recall@1/3/5/10 docs
+64/79/85/89, code 49.5/69.7/75.8/82.8). Baseline was 80.0 / 68.7, confirmed by the
+moulinette. Experiments log: `notes/experiments.md`.
 **Last measured indexing time:** 2.2 s (12 554 chunks, max 2000, 2026-09-29)
 **Last measured retrieval time (200 questions):** ≈ 20 s (2026-10-13: index load +
 tokenising ≈ 4 s per command, search 5.1 s docs / 6.3 s code, k=10; budget 90 s)
@@ -303,7 +304,12 @@ Goal: `search "..." --k 5` returns plausible source locations in milliseconds.
 - [ ] 4.a.1 Term frequency, document frequency, why IDF is a logarithm
 - [ ] 4.a.2 TF-IDF as sparse vectors + cosine similarity
 - [ ] 4.a.3 BM25: saturation (`k1`), length normalisation (`b`), what each changes here
-- [ ] 4.a.4 Inverted index and posting lists: why lookup is not a scan
+- [ ] 4.a.4 Inverted index and posting lists: why lookup is not a scan. **Nuance for
+  the defense:** our implementation IS a scan. `rank_bm25` keeps a forward index (one
+  `{term: tf}` dict per chunk) and, for each query term, walks all 12 554 dicts. A
+  real inverted index (`term → [(chunk, tf)]`) would only touch the chunks that
+  contain the term. At our scale the scan costs ≈ 17 ms per question, so it is fine;
+  on a million chunks it would not be.
 - [ ] 4.a.5 The vocabulary-mismatch tension (paraphrase vs verbatim identifier)
 - [x] 4.a.6 **Decision (2026-10-12):** BM25 first, from the `rank_bm25` library
   (`BM25Okapi`, k1=1.5, b=0.75). Allowed by the subject; own implementation kept as a
@@ -313,14 +319,19 @@ Goal: `search "..." --k 5` returns plausible source locations in milliseconds.
 - [x] 4.b.1 Baseline: lowercase, `[A-Za-z0-9_]+`
 - [x] 4.b.2 Identifier splitting: `snake_case` and `CamelCase` → sub-tokens, **while
   keeping the original token too** (`get_model_config` → whole + get, model, config)
-- [~] 4.b.3 Stopwords: none (IDF already zeroes a term in half the corpus, e.g.
-  "scheduler" in 2/4 test chunks). Stemming: none. Both are stage 6 experiments.
+- [x] 4.b.3 Stopwords: **yes since stage 6** (2026-10-13). Stage 4 reasoning was "IDF
+  already zeroes a term in half the corpus", true on a homogeneous corpus but wrong on
+  ours: `the` is only in the prose chunks (~15 %), so it marked "this is Markdown".
+  One-char CamelCase pieces (`v`, `e`, `s`) dropped too (`MIN_PIECE = 2`). Stemming:
+  none, not tested yet.
 - [x] 4.b.4 Same tokeniser used at index time and query time (single function, tested)
 
 ### 4.c Index
-- [x] 4.c.1 Inverted index, df, lengths: built in memory by `rank_bm25` at
-  `Retriever` construction (4 s for 12 554 chunks). Not persisted: `data/processed/`
-  only holds the chunks; rebuilding is cheaper than loading for now.
+- [x] 4.c.1 **No inverted index** (corrected 2026-10-14): `rank_bm25` builds, at
+  `Retriever` construction (4 s for 12 554 chunks), a forward index (`doc_freqs`: one
+  `{term: tf}` dict per chunk), the document frequencies turned into `idf`, the chunk
+  lengths and their average. Scoring is a scan (see 4.a.4). Not persisted:
+  `data/processed/` only holds the chunks; rebuilding is cheaper than loading.
 - [x] 4.c.3 tqdm on tokenising
 
 ### 4.d Scorer (`src/retriever.py`)
@@ -399,17 +410,21 @@ Goal: ≥ 80 % recall@5 on docs, ≥ 50 % on code, and I can explain every chang
 Method for each experiment: one variable at a time → re-index → `search_dataset` →
 `evaluate` → log the number in an experiments table → keep or revert.
 
-- [ ] 6.1 Create `notes/experiments.md` table: date, change, docs recall@5, code
+- [x] 6.1 Create `notes/experiments.md` table: date, change, docs recall@5, code
   recall@5, indexing time, retrieval time
-- [ ] 6.2 Error analysis first: list the 20 worst misses per dataset. For each: right
-  file wrong span? wrong file? term missing from vocabulary? chunk too big?
-- [ ] 6.3 Tokenisation experiments: with/without identifier splitting, stopwords,
-  stemming, keeping digits, keeping dotted paths (`vllm.engine.arg_utils`)
-- [ ] 6.4 Chunk-size experiments: 2000 / 1000 / 500 characters; overlap or not
+- [x] 6.2 Error analysis first: `evaluate --show_misses` classifies every miss as
+  `late` / `near` / `same_file` / `wrong_file` (2026-10-13). Baseline: docs 10
+  same_file, 5 wrong_file, 4 late, 1 near; code 15 / 9 / 6 / 1.
+- [~] 6.3 Tokenisation experiments: stopwords **kept** (+3 docs, +2 code);
+  MIN_PIECE=2 **kept** (+2 docs, +1 code), 3 rejected (−2 code). To do: acronym rule
+  (`APIs` → ap+is, `MXFP4` → mxf+p4), stemming, without identifier splitting.
+- [~] 6.4 Chunk-size experiments: 1000 **rejected** (docs =, code −4: more
+  competitors per file, `same_file` misses unchanged). 500 not worth trying.
 - [ ] 6.5 Chunk-boundary experiments: heading level for md, function vs class for py,
   prepend file path / class name / heading breadcrumb to the chunk text
-- [ ] 6.6 Scorer experiments: `k1` and `b` sweep (BM25), or the other scorer as a
-  comparison
+- [~] 6.6 Scorer experiments: `b` sweep done (2026-10-13): 0.75 → 0.6 → 0.5 → 0.3 gave
+  code 71.7 / 73.7 / **75.8** / 73.7, docs @5 flat at 85.0 (@1 drops 67 → 64).
+  **b = 0.5 kept.** `k1` not swept yet.
 - [ ] 6.7 Query-side experiments: boost verbatim identifiers found in the question,
   weight docs vs code chunks per question type
 - [ ] 6.8 Lock the winning configuration as defaults; re-check indexing < 5 min and

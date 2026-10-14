@@ -12,10 +12,13 @@ from src.models import (
 )
 from src.tokenizer import tokenize
 
-# rank_bm25 defaults, the usual starting point in the literature. Exposed
-# so that stage 6 can sweep them.
+# k1 is the rank_bm25 default. b was swept in stage 6 (2026-10-13): 0.75
+# -> 0.6 -> 0.5 -> 0.3 gave code recall@5 71.7 / 73.7 / 75.8 / 73.7 with
+# docs unchanged at 85.0. Less length normalisation helps because the
+# reference is often a long chunk (a whole function or section) that lost
+# to a short chunk of the same file.
 DEFAULT_K1 = 1.5
-DEFAULT_B = 0.75
+DEFAULT_B = 0.5
 
 
 class Retriever:

@@ -10,12 +10,27 @@ def test_empty_and_punctuation_only() -> None:
 
 
 def test_lowercase_and_separators() -> None:
-    assert tokenize("How do I enable lora?") == [
-        "how", "do", "i", "enable", "lora",
-    ]
+    assert tokenize("Enable LORA Adapters?") == ["enable", "lora", "adapters"]
     assert tokenize("vllm.engine.arg_utils") == [
         "vllm", "engine", "arg_utils", "arg", "utils",
     ]
+
+
+def test_stopwords_are_dropped_everywhere() -> None:
+    # Function words mark "this is prose" on a code-heavy corpus and
+    # pushed Markdown chunks up on every question (stage 6, +3 pts docs).
+    assert tokenize("How do I enable lora?") == ["enable", "lora"]
+    assert tokenize("What is the") == []
+    # Also inside identifier pieces: "APIs" splits into "ap" + "is".
+    assert tokenize("APIs") == ["apis", "ap"]
+
+
+def test_one_char_pieces_are_dropped() -> None:
+    # "v" and "e" are rare, so BM25 gives them a high weight for nothing.
+    # The whole word always stays; two-letter pieces such as "kv" stay.
+    assert tokenize("vLLM") == ["vllm", "llm"]
+    assert tokenize("MoE") == ["moe", "mo"]
+    assert tokenize("kv_cache") == ["kv_cache", "kv", "cache"]
 
 
 def test_snake_case_keeps_whole_and_pieces() -> None:
